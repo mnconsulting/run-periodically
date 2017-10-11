@@ -1,0 +1,259 @@
+#!/bin/bash
+
+# MIT License
+# 
+# Copyright (c) 2017 Matheus Neder
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+# param: $1 (optional) exit code, default 130.
+function terminate
+{
+    local EXIT_CODE=$1
+
+    if [ ! EXIT_CODE ]
+    then
+        EXIT_CODE=130
+    fi
+
+    # Get all PID, PPID, PGID or SID which maches this script's PID
+    local PPGIDS=`ps | egrep " $$ " | egrep -o "^ *[0-9]+ *" | egrep -o "[0-9]+"`
+
+    for i in $PPGIDS
+    do
+        if [ $i -ne $$ ]
+        then 
+            # Send SIGTERM to $i"
+            # echo "kill $i"
+            kill $i > /dev/null 2>&1
+            eval "sleep 10; kill -9 $i > /dev/null 2>&1" &
+        fi
+    done
+
+    exit $EXIT_CODE
+}
+
+trap "terminate" SIGINT SIGTERM
+
+KILL_AFTER=30 # default
+INTERVAL=10
+INTERVAL_BETWEEN_ERRORS=0
+JOB_TIMEOUT=0
+MAX_CONSECUTIVE_ERRORS=0
+
+# param: $1 valor a ser testado
+function is_valid_integer()
+{
+    local INTEGER_VALIDATION_REGEX='^[0-9]+$'
+
+    if [[ $1 =~ $INTEGER_VALIDATION_REGEX ]]
+    then
+        return 0
+    fi  
+
+    return 1
+}
+
+# Leitura dos parametros
+function usage()
+{
+    echo "Usage:"
+    echo
+    echo "$0 [OPTIONS] command comand-args..."
+    echo
+    echo "Options:"
+    echo
+    echo "-h | --help"
+    echo
+    echo "Show this message"
+    echo
+    echo "--interval=seconds "
+    echo    
+    echo "How many seconds to repeat command (starts counting at the end of the previous execution). Default: $INTERVAL"
+    echo
+    echo "--timeout=seconds"
+    echo    
+    echo "Timeout limit for command execution. If reach timeout, a SIGTERM will send to command asking him to exit. Default: 0 (inifinity timeout)"
+    echo
+    echo "--kill-after=seconds"
+    echo    
+    echo "When a timeout is reached, if the command not exits with SIGTERM, it will be killed after the kill-after seconds. Default: $KILL_AFTER"
+    echo
+    echo "--max-consecutive-errors=integer"
+    echo    
+    echo "The maximum number of consecutive errors that will be tolerated. When this limit is reached, $0 will terminate and the command will no longer being repeated until $0 is started again. Default: $MAX_CONSECUTIVE_ERRORS"
+	echo
+    echo "--interval-between-errors=seconds"
+    echo    
+    echo "Use a custom interval between errors instead of interval. Default: $INTERVAL_BETWEEN_ERRORS (If 0, --interval value is used)"
+    echo
+    echo "Example:"
+    echo    
+    echo "$0 --interval=300 --timeout=120 --kill-after=10 --max-consecutive-errors=5 --interval-between-errors=1800 ./my-job.sh arg1 arg2 arg3"
+    echo
+}
+
+while [ "$1" != "" ]; do
+    ARG=`echo $1 | awk -F= '{print $1}'`
+    VALUE=`echo $1 | awk -F= '{print $2}'`
+    case $ARG in
+        -h | --help)
+            echo "The purpose of this tool is to execute a command and repeat it infinitely in regular interval."
+            echo
+            usage
+            exit 0
+            ;;
+        --interval)
+            INTERVAL=$VALUE
+
+            if ! is_valid_integer $INTERVAL
+            then
+            	echo "Error: expected integer value for --interval (second(s))" >> /dev/stderr
+            	usage
+            	exit 1
+            fi
+
+            ;;
+        --timeout)
+            JOB_TIMEOUT=$VALUE
+
+            if ! is_valid_integer $JOB_TIMEOUT
+            then
+                echo "Error: expected integer value for --timeout (second(s))" >> /dev/stderr
+                usage
+                exit 1
+            fi            
+            ;;
+        --kill-after)
+            KILL_AFTER=$VALUE
+
+            if ! is_valid_integer $KILL_AFTER
+            then
+                echo "Error: expected integer value for --kill-after (second(s))" >> /dev/stderr
+                usage
+                exit 1
+            fi            
+            ;;            
+        --max-consecutive-errors)
+            MAX_CONSECUTIVE_ERRORS=$VALUE
+
+            if ! is_valid_integer $MAX_CONSECUTIVE_ERRORS
+            then
+                echo "Error: expected integer value for --max-consecutive-errors" >> /dev/stderr
+                usage
+                exit 1
+            fi            
+            ;;
+        --interval-between-errors)
+            INTERVAL_BETWEEN_ERRORS=$VALUE
+
+            if ! is_valid_integer $INTERVAL_BETWEEN_ERRORS
+            then
+                echo "Error: expected integer value for --interval-between-errors" >> /dev/stderr
+                usage
+                exit 1
+            fi            
+            ;;            
+        -*)
+            echo "Error: Unknow argument \"$ARG\"" >> /dev/stderr
+            usage
+            exit 1
+            ;;
+        *)
+            break
+            ;;
+    esac
+    shift
+done
+# Fim leitura dos parametros
+
+JOB=$@
+CONSECUTIVE_ERRORS=0
+
+if [ -z "$JOB" ]
+then
+    echo "Error: missing the job's command and args." >> /dev/stderr
+    usage
+    exit 1
+fi
+
+while [ 1 ]
+do
+    FATAL_STATUS=0
+    echo "Starting the job..."
+
+    if [ $JOB_TIMEOUT -gt 0 ]
+    then
+        timeout --kill-after=$KILL_AFTER $JOB_TIMEOUT $JOB &
+    else
+        eval $JOB &
+    fi
+
+    wait $!
+    JOB_EXIT_CODE=$?
+
+    if [ $JOB_EXIT_CODE -gt 0 ]
+    then
+        CONSECUTIVE_ERRORS=$(($CONSECUTIVE_ERRORS + 1))
+
+        if [ $JOB_EXIT_CODE -eq 124 ]
+        then
+            # timeout's 124 exit code means that due the $JOB_TIMEOUT exceed, the timeout sent a 
+            # SIGTERM to the job, and the job terminate the process
+            echo "TIMEOUT124: Job timeout! Exceed $JOB_TIMEOUT second(s)." >> /dev/stderr
+        elif [ $JOB_EXIT_CODE -eq 137 ] 
+        then
+            # job didnt terminate after received a SIGTERM and a SIGKILL (force kill) 
+            # was sent after $KILL_AFTER
+            echo "TIMEOUT137: Job timeout! Exceed $JOB_TIMEOUT second(s) and job didnt exit after $KILL_AFTER second(s) then it was killed." >> /dev/stderr
+        elif [ $JOB_EXIT_CODE -eq 127 ] || [ $JOB_EXIT_CODE -eq 126 ] 
+        then
+            FATAL_STATUS=$JOB_EXIT_CODE
+            echo "JOBFATAL: The given job command's not found or you don't have permission to execute." >> /dev/stderr
+        else
+            echo "JOBERROR: Job terminate with error code ${JOB_EXIT_CODE}." >> /dev/stderr
+        fi
+    else
+        CONSECUTIVE_ERRORS=0
+    fi
+    
+    if [ $FATAL_STATUS -eq 0 ] && [ $CONSECUTIVE_ERRORS -gt $MAX_CONSECUTIVE_ERRORS ]
+    then
+        echo "JOBFATAL: Reach max-consecutive-errors ($MAX_CONSECUTIVE_ERRORS)." >> /dev/stderr
+        FATAL_STATUS=$JOB_EXIT_CODE
+    fi
+
+    if [ $FATAL_STATUS -gt 0 ] # || [ $INTERVAL -eq 0 ]
+    then
+        break       
+    else
+        
+        if [ $INTERVAL_BETWEEN_ERRORS -gt 0 ] && [ $CONSECUTIVE_ERRORS -gt 0 ]
+        then
+            SLEEP_TIME=$INTERVAL_BETWEEN_ERRORS
+        else
+            SLEEP_TIME=$INTERVAL
+        fi
+
+        echo "Sleeping for $SLEEP_TIME second(s)..."
+        sleep $SLEEP_TIME
+    fi
+done 
+
+terminate $FATAL_STATUS
