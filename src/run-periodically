@@ -70,7 +70,6 @@ function is_valid_integer()
     return 1
 }
 
-# Leitura dos parametros
 function usage()
 {
     echo "Usage:"
@@ -109,6 +108,8 @@ function usage()
     echo
 }
 
+# arguments handling
+# based on https://gist.github.com/jehiah/855086#file-simple_args_parsing-sh
 while [ "$1" != "" ]; do
     ARG=`echo $1 | awk -F= '{print $1}'`
     VALUE=`echo $1 | awk -F= '{print $2}'`
@@ -181,7 +182,6 @@ while [ "$1" != "" ]; do
     esac
     shift
 done
-# Fim leitura dos parametros
 
 JOB=$@
 CONSECUTIVE_ERRORS=0
