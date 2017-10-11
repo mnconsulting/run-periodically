@@ -42,7 +42,7 @@ function terminate
             # Send SIGTERM to $i"
             # echo "kill $i"
             kill $i > /dev/null 2>&1
-            eval "sleep 10; kill -9 $i > /dev/null 2>&1" &
+            ( eval "sleep 10; kill -9 $i > /dev/null 2>&1" ) &
         fi
     done
 
