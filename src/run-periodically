@@ -60,7 +60,7 @@ MAX_CONSECUTIVE_ERRORS=0
 # param: $1 valor a ser testado
 function is_valid_integer()
 {
-    local INTEGER_VALIDATION_REGEX='^[0-9]+$'
+    local INTEGER_VALIDATION_REGEX='^[1-9][0-9]*$'
 
     if [[ $1 =~ $INTEGER_VALIDATION_REGEX ]]
     then
